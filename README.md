@@ -52,25 +52,63 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/rob/miniconda3/envs/dino/lib
 In the section below I explain all the flags used in the `main.py` to finetune to different datasets.
 
 ## Usage
+
+### Pascal VOC Dataset
 An example to run finetuning on the VOC dataset with LoRA and an FPN decoder, either DINOv3 or DINOv2.
 
 ```bash
 python main.py --exp_name base_voc --dataset voc --size base --dino_type dinov3 --img_dim 308 308 --epochs 50 --use_fpn
 ```
 
+### OpenFake Dataset
+This repository supports finetuning on the OpenFake dataset, a large-scale fake image detection dataset. The dataset is stored in Parquet format with images encoded as bytes.
+
+**Dataset Structure:**
+- Parquet files should be located in `{dataset_root}/data/` directory
+- Each parquet file contains columns: `image` (bytes), `prompt`, `label` (`real` or `fake`), `model`
+- Images are stored as `{'bytes': b'...'}` dictionary format
+- The dataset is automatically split into 80% training and 20% validation
+
+**Example:**
+```bash
+python main.py \
+    --exp_name openfake_dinov3_small \
+    --dataset openfake \
+    --dataset_root "D:\dataset\OpenFake" \
+    --size small \
+    --dino_type dinov3 \
+    --checkpoint_path "path/to/dinov3_vits16_pretrain_lvd1689m-08c60483.pth" \
+    --img_dim 512 512 \
+    --epochs 100 \
+    --use_lora \
+    --batch_size 32 \
+    --lr 3e-3
+```
+
+**Features:**
+- **Lazy Loading**: Images are loaded on-demand from parquet files, enabling training on large datasets (2TB+) without memory issues
+- **Index Caching**: Dataset indexing results are cached to avoid re-indexing on subsequent runs
+- **Memory Efficient**: Uses single-process data loading (`num_workers=0`) to prevent memory overflow
+- **Automatic Split**: Automatically splits parquet files into train/validation sets (80/20)
+
 **Flags**
 Some explanation of the more useful flags to use when running experiments.
 - --exp_name (str): The name of the experiment. This is used to identify the experiment and save results accordingly.
 - --debug (flag): A boolean flag to indicate whether to debug the main.py training code.
-- --dataset (str): The name of the dataset to use. either `voc` or `ade20k`
-- --size (str): The size configuration for the DINOv2 backbone parameter `small`, `base`, `large`, or `giant`
+- --dataset (str): The name of the dataset to use. either `voc`, `ade20k`, or `openfake`
+- --dataset_root (str): Root directory for OpenFake dataset. Required for `openfake` dataset.
+- --checkpoint_path (str): Path to local DINOv3 checkpoint file (.pth). Required for using local weights instead of downloading.
+- --dinov3_repo_dir (str): Local directory path to dinov3 repository. Defaults to torch hub cache if not provided.
+- --size (str): The size configuration for the DINOv2/DINOv3 backbone parameter `small`, `base`, `large`, `giant`, or `huge`
 - --r (int): the LoRA rank (r) parameter to determine the amount of parameters. Usually, a small value like 3-9.
 - --use_lora (flag): A boolean flag indicating whether to use Low-Rank Adaptation (LoRA). If this flag is present, LoRA is used. 
 - --dino_type (str): Pass the DINO version to use either `dinov2`, or `dinov3`.
 - --use_fpn (flag): A boolean flag to indicate whether to use the FPN decoder.
 - --lora_weights (str): Path to the file location to load the LoRA weights and decoder head from.
-- --img_dim (tuple of int): The dimensions of the input images (height width). This should be specified as two integers. Example: 308 308. 
-- --epochs (int): The number of training epochs. This determines how many times the model will pass through the entire training dataset. Example: 50. 
+- --img_dim (tuple of int): The dimensions of the input images (height width). This should be specified as two integers. Example: 512 512. Must be divisible by patch size (16 for DINOv3, 14 for DINOv2).
+- --epochs (int): The number of training epochs. This determines how many times the model will pass through the entire training dataset. Example: 100. 
+- --batch_size (int): The batch size for training. Default: 64.
+- --lr (float): Learning rate. Default: 3e-3.
 
 There are some more unnamed parameters for training like the learning rate and batch size.
 
@@ -210,6 +248,28 @@ I achieve a validation mean IoU of approximately 40.0% using LoRA and a 1x1 conv
   </tbody>
 </table>
 
+
+## OpenFake Dataset Results
+
+**Dataset Information:**
+- Training samples: ~635,000 (80% of parquet files)
+- Validation samples: ~30,000 (20% of parquet files)
+- Classes: 2 (real, fake)
+- Image format: JPEG bytes stored in Parquet files
+- Total dataset size: ~2TB
+
+**Training Features:**
+- Efficient lazy loading from Parquet files
+- Index caching for faster subsequent runs
+- Memory-efficient single-process data loading
+- Real-time training progress logging with tqdm
+
+**Example Training Output:**
+```
+2025-01-XX XX:XX:XX - INFO - Epoch 1/100 - Training started
+Epoch 1/100: 100%|████████| 1984/1984 [XX:XX<XX:XX, X.XXit/s]
+2025-01-XX XX:XX:XX - INFO - Epoch 1/100 - Train Loss: 0.5012 - Val Loss: 0.4890 - Val IoU: 0.6234 - LR: 0.003000
+```
 
 ## Citing
 If you reference or use the codebase in your research, please cite:
