@@ -1,75 +1,54 @@
-**[2025-09-09] added further exploration of the DINOv3 patch embedding in this [post-training repository](https://github.com/RobvanGastel/removing-pos-vit-bias).** \
-**[2025-08-27] Added DINOv3 weights to compare with DINOv2 experiments.** \
-**[2025-08-25] Added the ability to finetune DINOv3 encoders!**
+# Finetuning DINOv3 with LoRA for OpenFake Dataset
 
-# Finetuning DINOv2, DINOv3 with LoRA for Image Segmentation
+This repository provides tools for finetuning DINOv3 (Siméoni et al., 2025) encoder weights using Low-Rank Adaptation (LoRA) for image segmentation tasks on the OpenFake dataset. LoRA enables efficient finetuning by adding a small set of trainable parameters between encoder blocks without modifying the original encoder weights.
 
-<p>
-    <a href= "https://colab.research.google.com/github/RobvanGastel/dinov2-finetune/blob/main/Explanation.ipynb">
-    <img src="https://colab.research.google.com/assets/colab-badge.svg"/></a>
-</p>
+## Features
 
-This repository explores finetuning DINOv3 (Siméoni et al., 2025) or DINOv2 (Oquab et al., 2024) encoder weights using Low-Rank Adaptation (Hu et al., 2021) (LoRA) and a simple 1x1 convolution decoder. LoRA makes it possible to finetune to new tasks easier without adjusting the original encoder weights by adding a small set of weights between each encoder block. The DINOv2, DINOv3 encoder weights are learned by self-supervised learning and accurately capture the natural image domain. For example, by applying PCA to the outputs of the encoders, we can get a coarse segmentation of the objects in the image and see semantically similar objects colored in the same color.
-
-Check out the `Explanation.ipynb` notebook for a more detailed walkthrough of the code and ideas behind it.
-
-**DINOv3.** Les noise is visible when comparing the PCA outputs from DINOv3 versus the previous DINOv2.
-![](/assets/examples/pca_dinov3.png?raw=true)
-
-Previously DINOv2 could only produce high resolution PCA videos with FeatUp. But currently with DINOv3 we can scale to high resolution videos without FeatUp. See the `Embedding_visualization.ipynb`.
-
-
-
-https://github.com/user-attachments/assets/48222125-a826-4a15-badc-3454c1bcfe53
-
-
+- **DINOv3 Support**: Finetune DINOv3 encoders with LoRA for downstream tasks
+- **Large Dataset Support**: Efficient lazy loading from Parquet files, enabling training on 2TB+ datasets
+- **Memory Efficient**: Single-process data loading and index caching to prevent memory overflow
+- **OpenFake Dataset**: Optimized for the OpenFake fake image detection dataset
 
 ## Setup
-Install the packages using the `requirements.txt` file.
 
 ```bash
-# using conda
+# Create conda environment
 conda create --name dino python=3.11
 conda activate dino
-# Install the package for dino_finetune imports,
+
+# Install package
 pip install -e .
 ```
 
-Special dependency if you want to investigate the encoder features in higher resolution using [FeatUp](https://github.com/mhamilton723/FeatUp). I recreated methods to process videos and images in the notebook `Embedding_visualization.ipynb`. To run it yourself in the notebook you need to install the FeatUp directory, and as it uses a custom kernel you need to make sure all the CUDA environment variables are configured properly.
-```bash
-# For CUDA_HOME/nvcc, make sure you install the cudatoolkit-dev tools
-conda install -c conda-forge cudatoolkit-dev -y
-# Now you should be able to run, 
-nvcc -V
-# So you can set the CUDA_HOME path
-export CUDA_HOME=$CONDA_PREFIX
-# For the LD_LIBRARY_PATH install cudnn
-conda install -c conda-forge cudnn
-# And set the variable
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/rob/miniconda3/envs/dino/lib
+## OpenFake Dataset
+
+The OpenFake dataset is a large-scale fake image detection dataset stored in Parquet format.
+
+**Dataset Structure:**
+```
+D:\dataset\OpenFake\
+  └── data\
+      ├── batch_00000.parquet
+      ├── batch_00001.parquet
+      └── ...
 ```
 
-In the section below I explain all the flags used in the `main.py` to finetune to different datasets.
+**Parquet File Format:**
+- `image`: JPEG image bytes stored as `{'bytes': b'...'}` dictionary
+- `prompt`: Text prompt used for image generation
+- `label`: `'real'` or `'fake'`
+- `model`: Model name used for generation
+
+**Dataset Statistics:**
+- Training samples: ~635,000 (80% of parquet files)
+- Validation samples: ~30,000 (20% of parquet files)
+- Total dataset size: ~2TB
+- Classes: 2 (real, fake)
 
 ## Usage
 
-### Pascal VOC Dataset
-An example to run finetuning on the VOC dataset with LoRA and an FPN decoder, either DINOv3 or DINOv2.
+### Basic Training Command
 
-```bash
-python main.py --exp_name base_voc --dataset voc --size base --dino_type dinov3 --img_dim 308 308 --epochs 50 --use_fpn
-```
-
-### OpenFake Dataset
-This repository supports finetuning on the OpenFake dataset, a large-scale fake image detection dataset. The dataset is stored in Parquet format with images encoded as bytes.
-
-**Dataset Structure:**
-- Parquet files should be located in `{dataset_root}/data/` directory
-- Each parquet file contains columns: `image` (bytes), `prompt`, `label` (`real` or `fake`), `model`
-- Images are stored as `{'bytes': b'...'}` dictionary format
-- The dataset is automatically split into 80% training and 20% validation
-
-**Example:**
 ```bash
 python main.py \
     --exp_name openfake_dinov3_small \
@@ -85,210 +64,88 @@ python main.py \
     --lr 3e-3
 ```
 
-**Features:**
-- **Lazy Loading**: Images are loaded on-demand from parquet files, enabling training on large datasets (2TB+) without memory issues
-- **Index Caching**: Dataset indexing results are cached to avoid re-indexing on subsequent runs
-- **Memory Efficient**: Uses single-process data loading (`num_workers=0`) to prevent memory overflow
-- **Automatic Split**: Automatically splits parquet files into train/validation sets (80/20)
+### Key Parameters
 
-**Flags**
-Some explanation of the more useful flags to use when running experiments.
-- --exp_name (str): The name of the experiment. This is used to identify the experiment and save results accordingly.
-- --debug (flag): A boolean flag to indicate whether to debug the main.py training code.
-- --dataset (str): The name of the dataset to use. either `voc`, `ade20k`, or `openfake`
-- --dataset_root (str): Root directory for OpenFake dataset. Required for `openfake` dataset.
-- --checkpoint_path (str): Path to local DINOv3 checkpoint file (.pth). Required for using local weights instead of downloading.
-- --dinov3_repo_dir (str): Local directory path to dinov3 repository. Defaults to torch hub cache if not provided.
-- --size (str): The size configuration for the DINOv2/DINOv3 backbone parameter `small`, `base`, `large`, `giant`, or `huge`
-- --r (int): the LoRA rank (r) parameter to determine the amount of parameters. Usually, a small value like 3-9.
-- --use_lora (flag): A boolean flag indicating whether to use Low-Rank Adaptation (LoRA). If this flag is present, LoRA is used. 
-- --dino_type (str): Pass the DINO version to use either `dinov2`, or `dinov3`.
-- --use_fpn (flag): A boolean flag to indicate whether to use the FPN decoder.
-- --lora_weights (str): Path to the file location to load the LoRA weights and decoder head from.
-- --img_dim (tuple of int): The dimensions of the input images (height width). This should be specified as two integers. Example: 512 512. Must be divisible by patch size (16 for DINOv3, 14 for DINOv2).
-- --epochs (int): The number of training epochs. This determines how many times the model will pass through the entire training dataset. Example: 100. 
-- --batch_size (int): The batch size for training. Default: 64.
-- --lr (float): Learning rate. Default: 3e-3.
+**Required:**
+- `--exp_name`: Experiment name for saving results
+- `--dataset`: Set to `openfake`
+- `--dataset_root`: Root directory containing the `data/` folder with parquet files
+- `--checkpoint_path`: Path to local DINOv3 checkpoint file (.pth)
+- `--size`: Model size (`small`, `base`, `large`, `giant`, `huge`)
+- `--dino_type`: Set to `dinov3`
+- `--img_dim`: Image dimensions (height width). Must be divisible by 16 for DINOv3
+- `--use_lora`: Flag to enable LoRA finetuning
 
-There are some more unnamed parameters for training like the learning rate and batch size.
+**Optional:**
+- `--epochs`: Number of training epochs (default: 100)
+- `--batch_size`: Batch size (default: 64)
+- `--lr`: Learning rate (default: 3e-3)
+- `--r`: LoRA rank parameter (default: 3)
+- `--dinov3_repo_dir`: Local path to dinov3 repository (defaults to torch hub cache)
+- `--use_fpn`: Use FPN decoder instead of linear decoder
+- `--debug`: Enable debug mode with visualization output
 
-## Results
+### Training Features
 
-**Pascal VOC** \
-I achieve a validation mean IoU of approximately 71.8% using LoRA and a 1x1 convolution decoder with DINOv3 ViT-L weights. When applying ImageNet-C corruptions (Hendrycks & Dietterich, 2019) to test robustness on Pascal VOC, the validation mean IoU drops to 65.7% with corruption severity level 5 (the maximum). The performance of the corrupted evaluation does fluctuate, I estimate between 2-5% depending on the type of finetuning. This also holds for the ADE20k dataset. Just the decoder or LoRA with 1x1 convolutional decoder fluctuates less than the fpn decoder. The qualitative performance of DINOv2 with LoRA and a 1x1 decoder is illustrated in the figure below. Based on their qualitative and quantitative performance, these pre-trained weights handle image corruption effectively.
+**Lazy Loading:**
+- Images are loaded on-demand from parquet files during training
+- Enables training on very large datasets without loading everything into memory
 
+**Index Caching:**
+- Dataset indexing results are cached in `.index_cache/` directory
+- Subsequent runs skip indexing and load from cache
+- Cache is automatically invalidated if parquet files change
 
-![](/assets/examples/voc_corruption_performance.png?raw=true)
+**Memory Efficiency:**
+- Uses single-process data loading (`num_workers=0`) to prevent memory overflow
+- Parquet file caching limited to 2 files at a time
+- Efficient byte-to-image decoding
 
+**Progress Logging:**
+- Real-time training progress with tqdm progress bars
+- Detailed logging with timestamps, loss, IoU, and learning rate
+- Checkpoint saving every 5 epochs
 
-You can use the pre-trained weights using the `--lora_weights` flag or using the `load_parameters` function call. Registers here mean that extra context global context tokens are learned, see the second reference. All models are finetuned for 100 epochs.
+### Example Training Output
 
-I also ran experiments with DINOv3 on sizes ViT-B, and ViT-H, for which I obtained 71.5% and 73.3% mIoU for finetuning with LoRA and a linear head. The base model while performing similar is less robust to the corruptions.
-
-<table style="margin: auto">
-  <thead>
-    <tr>
-      <th>finetuned components</th>
-      <th>pre-training</th>
-      <th>model</th>
-      <th># of<br />params</th>
-      <th>with<br />registers</th>
-      <th>Pascal VOC<br />Validation mIoU</th>
-      <th>Pascal VOC-C<br />level 5<br />Validation mIoU</th>
-      <th>Directory</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>1x1 Conv decoder</td>
-      <td>DINOv2</td>
-      <td>ViT-L/14</td>
-      <td align="right">300 M</td>
-      <td align="center">✅</td>
-      <td align="right">49.2%</td>
-      <td align="right">40.0%</td>
-      <td>output/dinov2/large_voc_no_lora.pt</td>
-    </tr>
-    <tr>
-      <td>LoRA + 1x1 Conv decoder</td>
-      <td>DINOv3</td>
-      <td>ViT-L/16</td>
-      <td align="right">300 M</td>
-      <td align="center">✅</td>
-      <td align="right">71.8%</td>
-      <td align="right">65.4%</td>
-      <td>output/dinov3/large_base_voc_lora.pt</td>
-    </tr>
-    <tr>
-      <td>LoRA + 1x1 Conv decoder</td>
-      <td>DINOv2</td>
-      <td>ViT-L/14</td>
-      <td align="right">300 M</td>
-      <td align="center">✅</td>
-      <td align="right">67.7%</td>
-      <td align="right">57.3%</td>
-      <td>output/dinov2/large_base_voc_lora.pt</td>
-    </tr>
-    <tr>
-      <td>LoRA + FPN decoder</td>
-      <td>DINOv2</td>
-      <td>ViT-L/14</td>
-      <td align="right">300 M</td>
-      <td align="center">✅</td>
-      <td align="right">54.9%</td>
-      <td align="right">46.7%</td>
-      <td>output/dinov2/large_voc_fpn.pt</td>
-    </tr>
-  </tbody>
-</table>
-
-<br />
-
-**ADE20k** \
-I achieve a validation mean IoU of approximately 40.0% using LoRA and a 1x1 convolution decoder with DINOv3 ViT-L weights. With ADE20k-C (corruption severity level 5) the performance drops to 33.3%. An qualitative performance example of the DINOv2 LoRA + 1x1 decoder is illustrated in the figure below. 
-
-
-![](/assets/examples/ade20k_corruption_performance.png?raw=true)
-
-
-<table style="margin: auto">
-  <thead>
-    <tr>
-      <th>finetuned components</th>
-      <th>pre-training</th>
-      <th>model</th>
-      <th># of<br />params</th>
-      <th>with<br />registers</th>
-      <th>ADE20k<br />Validation mIoU</th>
-      <th>ADE20k-C<br />level 5<br />Validation mIoU</th>
-      <th>Directory</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>1x1 Conv decoder</td>
-      <td>DINOv2</td>
-      <td>ViT-L/14</td>
-      <td align="right">300 M</td>
-      <td align="center">✅</td>
-      <td align="right">31.3%</td>
-      <td align="right">26.8%</td>
-      <td>output/dinov2/large_ade20k_no_lora.pt</td>
-    </tr>
-    <tr>
-      <td>LoRA + 1x1 Conv decoder</td>
-      <td>DINOv3</td>
-      <td>ViT-L/16</td>
-      <td align="right">300M</td>
-      <td align="center">✅</td>
-      <td align="right">40.0%</td>
-      <td align="right">33.3%</td>
-      <td>output/dinov3/large_ade20k_lora.pt</td>
-    </tr>
-    <tr>
-      <td>LoRA + 1x1 Conv decoder</td>
-      <td>DINOv2</td>
-      <td>ViT-L/14</td>
-      <td align="right">300 M</td>
-      <td align="center">✅</td>
-      <td align="right">39.0%</td>
-      <td align="right">30.1%</td>
-      <td>output/dinov2/large_ade20k_lora.pt</td>
-    </tr>
-    <tr>
-      <td>LoRA + FPN decoder</td>
-      <td>DINOv2</td>
-      <td>ViT-L/14</td>
-      <td align="right">300 M</td>
-      <td align="center">✅</td>
-      <td align="right">36.9%</td>
-      <td align="right">28.9%</td>
-      <td>output/dinov2/large_ade20k_fpn.pt</td>
-    </tr>
-  </tbody>
-</table>
-
-
-## OpenFake Dataset Results
-
-**Dataset Information:**
-- Training samples: ~635,000 (80% of parquet files)
-- Validation samples: ~30,000 (20% of parquet files)
-- Classes: 2 (real, fake)
-- Image format: JPEG bytes stored in Parquet files
-- Total dataset size: ~2TB
-
-**Training Features:**
-- Efficient lazy loading from Parquet files
-- Index caching for faster subsequent runs
-- Memory-efficient single-process data loading
-- Real-time training progress logging with tqdm
-
-**Example Training Output:**
 ```
+2025-01-XX XX:XX:XX - INFO - Loading OpenFake dataset from: D:\dataset\OpenFake\data
+2025-01-XX XX:XX:XX - INFO - Found 543 parquet files
+2025-01-XX XX:XX:XX - INFO - Using 434 files for training (80%)
+2025-01-XX XX:XX:XX - INFO - Loading cached index from: D:\dataset\OpenFake\.index_cache\train_index_xxxxx.pkl
+2025-01-XX XX:XX:XX - INFO - Loaded 635138 samples from cache for train split
+2025-01-XX XX:XX:XX - INFO - Training started for 100 epochs
 2025-01-XX XX:XX:XX - INFO - Epoch 1/100 - Training started
 Epoch 1/100: 100%|████████| 1984/1984 [XX:XX<XX:XX, X.XXit/s]
 2025-01-XX XX:XX:XX - INFO - Epoch 1/100 - Train Loss: 0.5012 - Val Loss: 0.4890 - Val IoU: 0.6234 - LR: 0.003000
+Checkpoint saved: output/openfake_dinov3_small_e5.pt
 ```
 
-## Citing
-If you reference or use the codebase in your research, please cite:
+## Output Files
 
-```
-@misc{2024dinov2_lora_seg,
-    title={Finetuning DINOv2 and DINOv3 with LoRA for Image Segmentation},
-    author = {Van Gastel, Rob},
-    year={2024}
-}
-```
+Training results are saved in the `output/` directory:
+- `{exp_name}.pt`: Final model weights (LoRA + decoder)
+- `{exp_name}_e{epoch}.pt`: Checkpoint every 5 epochs
+- `{exp_name}_metrics.json`: Training metrics (train_loss, val_loss, val_iou)
+
+## Troubleshooting
+
+**Memory Error:**
+- Reduce `--batch_size`
+- Reduce `--img_dim`
+- Ensure `num_workers=0` is used (automatic for openfake dataset)
+
+**Slow Indexing:**
+- First run indexes all parquet files (takes time)
+- Subsequent runs use cached index (fast)
+- Cache files are in `.index_cache/` directory
+
+**Checkpoint Not Found:**
+- Download DINOv3 weights from [official repository](https://github.com/facebookresearch/dinov3)
+- Or use `--dinov3_repo_dir` to specify local repository path
 
 ## References
+
 Siméoni, O., Vo, H. V., Seitzer, M., Baldassarre, F., Oquab, M., Jose, C., Khalidov, V., Szafraniec, M., Yi, S., Ramamonjisoa, M., Massa, F., Haziza, D., Wehrstedt, L., Wang, J., Darcet, T., Moutakanni, T., Sentana, L., Roberts, C., Vedaldi, A., … Bojanowski, P. (2025). DINOv3 (No. arXiv:2508.10104). arXiv. https://doi.org/10.48550/arXiv.2508.10104
 
-Oquab, M., Darcet, T., Moutakanni, T., Vo, H., Szafraniec, M., Khalidov, V., Fernandez, P., Haziza, D., Massa, F., El-Nouby, A., Assran, M., Ballas, N., Galuba, W., Howes, R., Huang, P.-Y., Li, S.-W., Misra, I., Rabbat, M., Sharma, V., … Bojanowski, P. (2024). DINOv2: Learning Robust Visual Features without Supervision (arXiv:2304.07193). arXiv. http://arxiv.org/abs/2304.07193
-
-Darcet, T., Oquab, M., Mairal, J., & Bojanowski, P. (2024). Vision Transformers Need Registers (arXiv:2309.16588). arXiv. https://doi.org/10.48550/arXiv.2309.16588
-
 Hu, E. J., Shen, Y., Wallis, P., Allen-Zhu, Z., Li, Y., Wang, S., Wang, L., & Chen, W. (2021). LoRA: Low-Rank Adaptation of Large Language Models (arXiv:2106.09685). arXiv. http://arxiv.org/abs/2106.09685
-
-Hendrycks, D., & Dietterich, T. G. (2019). Benchmarking Neural Network Robustness to Common Corruptions and Surface Variations (arXiv:1807.01697). arXiv. https://doi.org/10.48550/arXiv.1807.01697
