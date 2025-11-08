@@ -1,6 +1,11 @@
 torch>=2.1.2
 torchvision
+torchmetrics
+pandas
+numpy
+tqdm
 matplotlib
 albumentations
 opencv-python
 moviepy
+termcolor
